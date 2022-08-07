@@ -1,10 +1,9 @@
-from html import entities
 from dotenv import load_dotenv
 from os import environ
 from tweepy import Client, Paginator, Tweet, Response
 from datetime import datetime
 from bs4 import BeautifulSoup
-from typing import Any, TypedDict
+from typing import Any
 
 import requests
 
@@ -12,15 +11,15 @@ import requests
 load_dotenv()
 
 
-def search_tweets(client: Client) -> list[Tweet]:
+def search_tweets(client: Client, limit=None, max_result=500) -> list[Tweet]:
     query = "(unvaccinated OR vaccine) (#unvaccinated OR #vaccine) lang:en -is:retweet -is:reply -is:quote -has:media -has:images"
     date_pattern = "%Y-%m-%d"
     start_time = datetime.strptime("2022-07-06", date_pattern)
     end_time = datetime.strptime("2022-08-06", date_pattern)
     tweets: list[Tweet] = []
 
-    for response in Paginator(client.search_all_tweets, query, start_time=start_time, end_time=end_time, max_results=10,
-                              tweet_fields=["author_id", "public_metrics", "entities"], limit=1):
+    for response in Paginator(client.search_all_tweets, query, start_time=start_time, end_time=end_time, max_results=max_result,
+                              tweet_fields=["author_id", "public_metrics", "entities"], limit=limit):
         response: Response
 
         tweets.extend(response.data)
@@ -109,22 +108,21 @@ def get_urls(tweet: Tweet) -> dict[str, Any]:
     }
 
 
+def extract_tweet_features(tweet: Tweet):
+    result = dict(id=tweet.id, text=tweet.text, author_id=tweet.author_id)
+    result.update(tweet.public_metrics)
+    result.update(get_hashtags(tweet))
+    result.update(get_urls(tweet))
+
+    return result
+
 
 if __name__ == "__main__":
     client = Client(
         bearer_token=environ["ACADEMIC_BEARER_TOKEN"], wait_on_rate_limit=True)
 
-    tweets = search_tweets(client)
-
+    tweets = search_tweets(client, limit=1, max_result=10)
     for tweet in tweets:
-        # print(tweet.id)
-        # print(tweet.text)
-        # print(tweet.author_id)
-        # print(tweet.public_metrics)
-        # print(tweet.entities)
-        e = get_hashtags(tweet)
-        print(e)
-        f = get_urls(tweet)
-        print(f)
+        print(extract_tweet_features(tweet))
 
         print("\n..........................................")
