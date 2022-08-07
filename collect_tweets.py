@@ -13,20 +13,24 @@ import requests
 load_dotenv()
 
 
-def search_tweets(client: Client, limit=None, max_result=500) -> list[Tweet]:
-    query = "(unvaccinated OR vaccine) (#unvaccinated OR #vaccine) lang:en -is:retweet -is:reply -is:quote -has:media -has:images"
+def run(client: Client, limit=None, max_result=100):
+    query = "(unvaccinated OR vaccine) (#unvaccinated OR #vaccine OR #vaccineinjuries OR #VaccineSideEffects OR #vaccinedamage OR #VaccineInjured OR #StoptheShots) lang:en -is:retweet -is:reply -is:quote -has:media -has:images"
     date_pattern = "%Y-%m-%d"
     start_time = datetime.strptime("2022-07-06", date_pattern)
     end_time = datetime.strptime("2022-08-06", date_pattern)
-    tweets: list[Tweet] = []
 
     for response in Paginator(client.search_all_tweets, query, start_time=start_time, end_time=end_time, max_results=max_result,
                               tweet_fields=["author_id", "public_metrics", "entities"], limit=limit):
         response: Response
+        if response.data is None:
+            continue
 
-        tweets.extend(response.data)
+        for tweet in response.data:
+            tweet: Tweet
 
-    return tweets
+            tweet_features = extract_tweet_features(tweet)
+            tweet_features["created_at"] = datetime.today()
+            collection.insert_one(tweet_features)
 
 
 def get_webpage_meta(url: str, tweet_id: str) -> dict:
@@ -111,7 +115,8 @@ def get_urls(tweet: Tweet) -> dict[str, Any]:
 
 
 def extract_tweet_features(tweet: Tweet):
-    result = dict(tweet_id=tweet.id, tweet_text=tweet.text, author_id=tweet.author_id)
+    result = dict(tweet_id=tweet.id, tweet_text=tweet.text,
+                  author_id=tweet.author_id)
     result.update(tweet.public_metrics)
     result.update(get_hashtags(tweet))
     result.update(get_urls(tweet))
@@ -124,9 +129,4 @@ if __name__ == "__main__":
         bearer_token=environ["ACADEMIC_BEARER_TOKEN"], wait_on_rate_limit=True)
     collection = get_collection("all_tweets")
 
-    tweets = search_tweets(client, limit=1, max_result=10)
-
-    for tweet in tweets:
-        tweet_features = extract_tweet_features(tweet)
-        tweet_features["created_at"] = datetime.today()
-        collection.insert_one(tweet_features)
+    tweets = run(client, limit=1, max_result=10)
