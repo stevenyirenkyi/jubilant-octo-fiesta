@@ -4,6 +4,8 @@ from tweepy import Client, Paginator, Tweet, Response
 from datetime import datetime
 from bs4 import BeautifulSoup
 from typing import Any
+from db import get_collection
+from datetime import datetime
 
 import requests
 
@@ -109,7 +111,7 @@ def get_urls(tweet: Tweet) -> dict[str, Any]:
 
 
 def extract_tweet_features(tweet: Tweet):
-    result = dict(id=tweet.id, text=tweet.text, author_id=tweet.author_id)
+    result = dict(tweet_id=tweet.id, tweet_text=tweet.text, author_id=tweet.author_id)
     result.update(tweet.public_metrics)
     result.update(get_hashtags(tweet))
     result.update(get_urls(tweet))
@@ -120,9 +122,11 @@ def extract_tweet_features(tweet: Tweet):
 if __name__ == "__main__":
     client = Client(
         bearer_token=environ["ACADEMIC_BEARER_TOKEN"], wait_on_rate_limit=True)
+    collection = get_collection("all_tweets")
 
     tweets = search_tweets(client, limit=1, max_result=10)
-    for tweet in tweets:
-        print(extract_tweet_features(tweet))
 
-        print("\n..........................................")
+    for tweet in tweets:
+        tweet_features = extract_tweet_features(tweet)
+        tweet_features["created_at"] = datetime.today()
+        collection.insert_one(tweet_features)
