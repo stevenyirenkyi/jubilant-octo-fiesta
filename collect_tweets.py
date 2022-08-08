@@ -8,37 +8,63 @@ from db import get_collection
 from datetime import datetime
 from pymongo.collection import Collection
 from retry import retry
+from queue import Queue
+from threading import Thread
 
 import requests
 import logging
 
-
+collection = get_collection("all_tweets")
 load_dotenv()
 logging.basicConfig(filename='logs/collect_tweets.log',
-                    format='%(asctime)s %(name)s - %(levelname)s - %(message)s', level=logging.INFO, )
+                    format='%(asctime)s %(name)s - %(levelname)s - %(message)s - %(thread)d', level=logging.INFO)
 
 
-def run(client: Client, collection: Collection, limit=None, max_result=100):
+class Worker(Thread):
+    def __init__(self, queue: Queue):
+        Thread.__init__(self)
+        self.queue = queue
+
+    def run(self):
+        while True:
+            tweet: Tweet = self.queue.get()
+            try:
+                logging.info(f"Processing. Tweet ID {tweet.id}")
+                tweet_features = extract_tweet_features(tweet)
+                tweet_features["created_at"] = datetime.today()
+                collection.insert_one(tweet_features)
+            except Exception as e:
+                logging.error(
+                    f"Failed. Tweet ID {tweet.id}\n.....{e}\n.....\n\n")
+            finally:
+                self.queue.task_done()
+
+
+def run(client: Client):
     query = "(unvaccinated OR vaccine) (#unvaccinated OR #vaccine OR #vaccineinjuries OR #VaccineSideEffects OR #vaccinedamage OR #VaccineInjured OR #StoptheShots) lang:en -is:retweet -is:reply -is:quote -has:media -has:images"
     date_pattern = "%Y-%m-%d"
     start_time = datetime.strptime("2022-07-06", date_pattern)
     end_time = datetime.strptime("2022-08-06", date_pattern)
 
-    for response in Paginator(client.search_all_tweets, query, start_time=start_time, end_time=end_time, max_results=max_result,
-                              tweet_fields=["author_id", "public_metrics", "entities"], limit=limit):
+    for response in Paginator(client.search_all_tweets, query, start_time=start_time, end_time=end_time, max_results=100,
+                              tweet_fields=["author_id", "public_metrics", "entities"]):
         response: Response
         if response.data is None:
             continue
 
-        
+        logging.info("Creating queue")
+
+        queue = Queue()
+        for i in range(4):
+            worker = Worker(queue)
+            worker.daemon = True
+            worker.start()
 
         for tweet in response.data:
-            tweet: Tweet
+            queue.put(tweet)
 
-            logging.info(f"Processing tweet: {tweet.id}")
-            # tweet_features = extract_tweet_features(tweet)
-            # tweet_features["created_at"] = datetime.today()
-            # collection.insert_one(tweet_features)
+        print(f"Processing {len(response.data)} tweets")
+        queue.join()
 
 
 @retry(requests.exceptions.ConnectionError, delay=5, backoff=2, tries=6, logger=logging)
@@ -128,6 +154,5 @@ def extract_tweet_features(tweet: Tweet):
 if __name__ == "__main__":
     client = Client(
         bearer_token=environ["ACADEMIC_BEARER_TOKEN"], wait_on_rate_limit=True)
-    collection = get_collection("all_tweets")
 
-    tweets = run(client, collection, limit=1, max_result=10)
+    tweets = run(client)
