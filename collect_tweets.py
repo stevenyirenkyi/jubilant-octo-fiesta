@@ -14,8 +14,8 @@ from threading import Thread
 import requests
 import logging
 
-collection = get_collection("all_tweets")
 load_dotenv()
+collection = get_collection("all_tweets")
 logging.basicConfig(filename='logs/collect_tweets.log',
                     format='%(asctime)s %(name)s - %(levelname)s - %(message)s - %(thread)d', level=logging.INFO)
 
@@ -35,7 +35,7 @@ class Worker(Thread):
                 collection.insert_one(tweet_features)
             except Exception as e:
                 logging.error(
-                    f"Failed. Tweet ID {tweet.id}\n.....{e}\n.....\n\n")
+                    f"Failed. Tweet ID {tweet.id}\n.....\n{e}\n.....\n")
             finally:
                 self.queue.task_done()
 
@@ -125,9 +125,16 @@ def get_urls(tweet: Tweet) -> dict[str, Any]:
             urls.append(url)
             continue
 
-        meta = get_webpage_meta(url, tweet.id)
+        try:
+            meta = get_webpage_meta(url, tweet.id)
+        except:
+            descriptions.append("")
+            titles.append("")
+            continue
+
         if meta is None:
             continue
+
         descriptions.append(meta.get("description"))
         titles.append(meta.get("title"))
         urls.append(url)
