@@ -6,14 +6,19 @@ from bs4 import BeautifulSoup
 from typing import Any
 from db import get_collection
 from datetime import datetime
+from pymongo.collection import Collection
+from retry import retry
 
 import requests
+import logging
 
 
 load_dotenv()
+logging.basicConfig(filename='logs/collect_tweets.log',
+                    format='%(asctime)s %(name)s - %(levelname)s - %(message)s', level=logging.INFO, )
 
 
-def run(client: Client, limit=None, max_result=100):
+def run(client: Client, collection: Collection, limit=None, max_result=100):
     query = "(unvaccinated OR vaccine) (#unvaccinated OR #vaccine OR #vaccineinjuries OR #VaccineSideEffects OR #vaccinedamage OR #VaccineInjured OR #StoptheShots) lang:en -is:retweet -is:reply -is:quote -has:media -has:images"
     date_pattern = "%Y-%m-%d"
     start_time = datetime.strptime("2022-07-06", date_pattern)
@@ -25,38 +30,34 @@ def run(client: Client, limit=None, max_result=100):
         if response.data is None:
             continue
 
+        
+
         for tweet in response.data:
             tweet: Tweet
 
-            tweet_features = extract_tweet_features(tweet)
-            tweet_features["created_at"] = datetime.today()
-            collection.insert_one(tweet_features)
+            logging.info(f"Processing tweet: {tweet.id}")
+            # tweet_features = extract_tweet_features(tweet)
+            # tweet_features["created_at"] = datetime.today()
+            # collection.insert_one(tweet_features)
 
 
+@retry(requests.exceptions.ConnectionError, delay=5, backoff=2, tries=6, logger=logging)
 def get_webpage_meta(url: str, tweet_id: str) -> dict:
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.89 Safari/537.36"
-        }
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, "html.parser")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.89 Safari/537.36"
+    }
+    response = requests.get(url, headers=headers)
+    soup = BeautifulSoup(response.text, "html.parser")
 
-        og_title = soup.find("meta", property="og:title")
-        og_description = soup.find("meta", property="og:description")
-        title = soup.title
-        description = soup.find("meta", attrs={"name": "description"})
+    og_title = soup.find("meta", property="og:title")
+    og_description = soup.find("meta", property="og:description")
+    title = soup.title
+    description = soup.find("meta", attrs={"name": "description"})
 
-        return {
-            "title": og_title["content"] if og_title else title.string if title else "",
-            "description": og_description["content"] if og_description else description["content"] if description else ""
-        }
-
-    except requests.exceptions.ConnectionError:
-        # TODO: LOG ERRORS
-        return None
-    except Exception as e:
-        print(e)
-        return None
+    return {
+        "title": og_title["content"] if og_title else title.string if title else "",
+        "description": og_description["content"] if og_description else description["content"] if description else ""
+    }
 
 
 def get_hashtags(tweet: Tweet) -> dict:
@@ -129,4 +130,4 @@ if __name__ == "__main__":
         bearer_token=environ["ACADEMIC_BEARER_TOKEN"], wait_on_rate_limit=True)
     collection = get_collection("all_tweets")
 
-    tweets = run(client, limit=1, max_result=10)
+    tweets = run(client, collection, limit=1, max_result=10)
